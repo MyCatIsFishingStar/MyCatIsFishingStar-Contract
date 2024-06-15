@@ -1,0 +1,80 @@
+import { Blockchain, SandboxContract, TreasuryContract } from '@ton/sandbox';
+import { toNano } from '@ton/core';
+import { CatTestContract } from '../wrappers/CatTestContract';
+import '@ton/test-utils';
+
+describe('CatTestContract', () => {
+    let blockchain: Blockchain;
+    let deployer: SandboxContract<TreasuryContract>;
+    let catTestContract: SandboxContract<CatTestContract>;
+
+    beforeEach(async () => {
+        blockchain = await Blockchain.create();
+
+        catTestContract = blockchain.openContract(await CatTestContract.fromInit());
+
+        deployer = await blockchain.treasury('deployer');
+
+        const deployResult = await catTestContract.send(
+            deployer.getSender(),
+            {
+                value: toNano('0.05'),
+            },
+            {
+                $$type: 'Deploy',
+                queryId: 0n,
+            },
+        );
+
+        expect(deployResult.transactions).toHaveTransaction({
+            from: deployer.address,
+            to: catTestContract.address,
+            deploy: true,
+            success: true,
+        });
+    });
+
+    it('should deploy', async () => {
+        // the check is done inside beforeEach
+        // blockchain and catTestContract are ready to use
+    });
+
+    it('should process claims and update claim count', async () => {
+        const claimTypes = ['claimType1', 'claimType2', 'claimType3'];
+
+        for (const claimType of claimTypes) {
+            const claimer = await blockchain.treasury('claimer-' + claimType);
+
+            const claimCountBefore = await catTestContract.getGetUserClaimCount(claimer.address);
+
+            console.log(`claim count before processing ${claimType}`, claimCountBefore);
+
+            const claimResult = await catTestContract.send(
+                claimer.getSender(),
+                {
+                    value: toNano('0.05'),
+                },
+                {
+                    $$type: 'ClaimProcessed',
+                    claimType: claimType,
+                },
+            );
+
+            expect(claimResult.transactions).toHaveTransaction({
+                from: claimer.address,
+                to: catTestContract.address,
+                success: true,
+            });
+
+            const claimCountAfter = await catTestContract.getGetUserClaimCount(claimer.address);
+
+            console.log(`claim count after processing ${claimType}`, claimCountAfter);
+
+            if (claimCountBefore === null) {
+                expect(claimCountAfter?.claimCount).toBe(BigInt(1));
+            } else {
+                expect(claimCountAfter?.claimCount).toBe(claimCountBefore.claimCount + BigInt(1));
+            }
+        }
+    });
+});
